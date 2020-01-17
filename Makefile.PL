@@ -11,7 +11,7 @@ WriteMakefile(
     AUTHOR            => 'Pavel Andryushin',
     VERSION_FROM      => 'lib/Net/Prometheus/Pushgateway.pm', # finds $VERSION, requires EU::MM from perl >= 5.5
     PREREQ_PM         => {
-        'LWP::UserAgent'          => '1.31',
+        'LWP::UserAgent'          => '6.26',
     },
     META_MERGE   => {
           requires  => { perl => '5.14.2' },
