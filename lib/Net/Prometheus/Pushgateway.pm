@@ -7,7 +7,7 @@ use utf8;
 use Carp qw/croak carp/;
 use LWP::UserAgent;
 
-our $VERSION    = '0.01';
+our $VERSION    = '0.02';
 
 my %METRIC_VALID_TYPES = (
     'untyped'       => 1,
@@ -29,40 +29,88 @@ sub new {
     return bless $self, $class;
 }
 
+sub add {
+    my $self = shift;
+    my $raw_str = $self->_add(@_);
+    return $self->_send_to_prometheus($raw_str);
+}
+
 sub increment {
     my $self = shift;
-    $self->add(
+    my $raw_str = $self->_add(
         @_,
         '-value'    => 1,
         '-type'     => 'counter',
     );
+    return $self->_send_to_prometheus($raw_str);
 }
 
 sub summary {
     my $self = shift;
-    $self->add(
+    my $raw_str = $self->_add(
         @_,
         '-type'     => 'summary',
     );
+    return $self->_send_to_prometheus($raw_str);
 }
 
-sub add {
+sub gauge {
+    my $self = shift;
+    my $raw_str = $self->_add(
+        @_,
+        '-type'     => 'gauge',
+    );
+    return $self->_send_to_prometheus($raw_str);
+}
+
+sub histogram {
     my ($self, %opt) = @_;
     my $metric_name         = $opt{'-metric_name'}          // croak "You must specify '-metric_name' param";
     my $label               = $opt{'-label'}                // {};
     my $value               = $opt{'-value'}                // croak "You must specify '-value' param";
-    my $type                = lc($opt{'-type'})             // 'untyped';
+    my $buckets             = $opt{'-buckets'}              // croak "You must specify '-buckets' param";
+    croak "Param '-buckets' must be arrayref" if ref($buckets) ne 'ARRAY';
+    croak "Label must be hashref" if ref($label) ne 'HASH';
+
+    my @metrics;
+    push @metrics, "# TYPE $metric_name histogram\n";
+    push @metrics, $self->_prepare_raw_metric($metric_name . '_count', $label, 1);
+    push @metrics, $self->_prepare_raw_metric($metric_name . '_sum', $label, $value);
+
+    for my $bucket (@$buckets) {
+        push @metrics, $self->_prepare_raw_metric($metric_name . '_bucket', { %$label, 'le' => $bucket}, $value <= $bucket ? 1 : 0);
+    }
+    push @metrics, $self->_prepare_raw_metric($metric_name . '_bucket', { %$label, 'le' => '+Inf'}, 1);
+
+    return $self->_send_to_prometheus(join('', @metrics));
+}
+
+sub _add {
+    my ($self, %opt) = @_;
+    my $metric_name         = $opt{'-metric_name'}          // croak "You must specify '-metric_name' param";
+    my $label               = $opt{'-label'}                // {};
+    my $value               = $opt{'-value'}                // croak "You must specify '-value' param";
+    my $type                = $opt{'-type'}                 // 'untyped';
+    $type = lc($type);
 
     croak "Label must be hashref" if ref($label) ne 'HASH';
     croak "Unvalid metric type: '$type'. Valid types: " . join(', ', keys %METRIC_VALID_TYPES) if not $METRIC_VALID_TYPES{$type};
 
-    my $raw_str = "# TYPE $metric_name $type\n";
-    $raw_str .= $metric_name;
+    my $type_str = "# TYPE $metric_name $type\n";
+
+    my $raw_metric = $self->_prepare_raw_metric($metric_name, $label, $value);
+
+    return $type_str . $raw_metric;
+}
+
+sub _prepare_raw_metric {
+    my ($self, $metric_name, $label, $value) = @_;
+    my $raw_str = $metric_name;
     if ($label) {
         $raw_str .= '{' . join (', ', map {$_ . '="' . $label->{$_} . '"'} keys %$label) . '}';
     }
     $raw_str .= " $value\n";
-    return $self->_send_to_prometheus($raw_str);
+    return $raw_str;
 }
 
 sub _send_to_prometheus {
@@ -108,8 +156,10 @@ B<Net::Prometheus::Pushgateway> - client module for pushing metrics to prometheu
     $metric->increment(-metric_name => 'perl_metric_increment', -label => {'perl_label' => 5});
 
     # Send summary metric
-    $metric->summary(-metric_name => 'perl_metric_summary', -label => {'perl_label' => 5}, value => 15);
+    $metric->summary(-metric_name => 'perl_metric_summary', -label => {'perl_label' => 5}, -value => 15);
 
+    # Send histogram metric
+    $metric->histogram(-metric_name => 'perl_metric_histogram', -label => {'perl_label' => 5}, -value => 15, -buckets => [qw/1 2 3 4 5/]);
 
 
 =head1 METHODS
@@ -150,6 +200,17 @@ Push summary metrics
     Options:
         -metric_name            => Name of pushed metrics
         -value                  => Metric value
+        -label                  => HashRef to metric labels (default: {})
+
+=head2 histogram(%opt)
+
+Push histogram metric
+
+    Options:
+        -metric_name            => Name of pushed metrics
+        -value                  => Metric value
+        -label                  => HashRef to metric labels (default: {})
+        -buckets                => ArayRef to buckets values
 
 =head1 DEPENDENCE
 
