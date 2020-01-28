@@ -7,7 +7,7 @@ use utf8;
 use Carp qw/croak carp/;
 use LWP::UserAgent;
 
-our $VERSION    = '0.02';
+our $VERSION    = '0.04';
 
 my %METRIC_VALID_TYPES = (
     'untyped'       => 1,
@@ -23,7 +23,9 @@ sub new {
     $self->{'host'}         = $opt{'-host'}     // croak "You must specify '-host' param";
     $self->{'port'}         = $opt{'-port'}     // croak "You must specify '-port' param";
     my $path                = $opt{'-path'};
+    my $timeout             = $opt{'-timeout'}  // 5;
     $self->{'ua'}           = LWP::UserAgent->new();
+    $self->{'ua'}->timeout($timeout);
     $self->{'url'} = 'http://' . $self->{host} . ':' . $self->{'port'} . $path;
 
     return bless $self, $class;
@@ -172,6 +174,7 @@ Create Net::Prometheus::Pushgateway object
         -host                   => Prometheus exporter host
         -port                   => Prometheus exporter port number
         -path                   => Path to prometheus exporter host (/api/ui/metrics - prometheus aggregation gateway, /metrics/job/<job_name>/instance/<instance_name> - prometeus
+        -timeout                => LWP::UserAgent timeout (default: 5)
 
 =head1 PUSH METRICS
 
@@ -196,6 +199,15 @@ Push increment metrics
 =head2 summary(%opt)
 
 Push summary metrics
+
+    Options:
+        -metric_name            => Name of pushed metrics
+        -value                  => Metric value
+        -label                  => HashRef to metric labels (default: {})
+
+=head2 gauge(%opt)
+
+Push gauge metrics
 
     Options:
         -metric_name            => Name of pushed metrics
